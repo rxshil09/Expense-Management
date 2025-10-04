@@ -1,128 +1,216 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// ---------- Prisma (Postgres) ----------
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
 
-generator client {
-  provider = "prisma-client-js"
-}
+enum Role { ADMIN MANAGER EMPLOYEE }
 
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+enum ExpenseStatus { DRAFT PENDING APPROVED REJECTED CANCELLED }
+
+enum ApprovalTaskStatus { PENDING APPROVED REJECTED SKIPPED }
+
+enum ApprovalInstanceStatus { PENDING APPROVED REJECTED CANCELLED }
+
+enum ApprovalRuleType { NONE PERCENTAGE SPECIFIC HYBRID }
+
+enum LogicalOperator { AND OR }
+
+enum OcrStatus { NONE QUEUED DONE FAILED }
+
+// ---------- Tenancy & Users ----------
+model Company {
+  id              String   @id @default(cuid())
+  name            String
+  countryCode     String           // e.g., "IN"
+  defaultCurrency String           // e.g., "INR"
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  users           User[]
+  policies        ApprovalPolicy[]
+  expenses        Expense[]
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  firstName String
-  lastName  String
-  role      Role     @default(EMPLOYEE)
-  companyId String
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String?
+  name          String
+  role          Role
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  company   Company @relation(fields: [companyId], references: [id])
-  expenses  Expense[]
-  approvals Approval[]
+  employeeProfile EmployeeProfile?
+  submittedExpenses Expense[] @relation("SubmittedBy")
+  approvalTasks     ApprovalTask[]
 
-  @@map("users")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([companyId, role])
 }
 
-model Company {
-  id          String   @id @default(cuid())
-  name        String
-  domain      String   @unique
-  currency    String   @default("USD")
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+model EmployeeProfile {
+  id        String @id @default(cuid())
+  userId    String @unique
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  users    User[]
-  rules    Rule[]
-  expenses Expense[]
-
-  @@map("companies")
+  // Direct manager within same company
+  managerId String?
+  manager   User?  @relation("ManagesEmployees", fields: [managerId], references: [id])
 }
 
-model Rule {
-  id          String      @id @default(cuid())
-  name        String
-  companyId   String
-  category    String?
-  minAmount   Decimal?
-  maxAmount   Decimal?
-  approvers   String[]    // JSON array of user IDs
-  sequence    Int         @default(1)
-  percentage  Int?        // For percentage-based approvals
-  ruleType    RuleType    @default(SEQUENTIAL)
-  isActive    Boolean     @default(true)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+// ---------- OCR (minimal) ----------
+model Receipt {
+  id         String    @id @default(cuid())
+  companyId  String
+  company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  company Company @relation(fields: [companyId], references: [id])
+  imageUrl   String
+  ocrStatus  OcrStatus @default(NONE)
+  ocrEngine  String?   // "tesseract", "textract", etc.
+  rawText    String?
+  parsed     Json?     // vendor/date/lineItems/total candidates (optional)
 
-  @@map("rules")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  expense    Expense?
 }
 
+// ---------- Expenses ----------
 model Expense {
-  id          String        @id @default(cuid())
-  userId      String
-  companyId   String
-  amount      Decimal
-  currency    String        @default("USD")
-  category    String
-  description String
-  date        DateTime
-  receiptUrl  String?
-  status      ExpenseStatus @default(PENDING)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id                String   @id @default(cuid())
+  companyId         String
+  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  user      User       @relation(fields: [userId], references: [id])
-  company   Company    @relation(fields: [companyId], references: [id])
-  approvals Approval[]
+  submittedById     String
+  submittedBy       User     @relation("SubmittedBy", fields: [submittedById], references: [id], onDelete: Restrict)
 
-  @@map("expenses")
+  category          String
+  description       String?
+  expenseDate       DateTime
+
+  // Multi-currency: store original + frozen company-currency snapshot
+  amountOriginal    Decimal  @db.Decimal(18, 2)
+  currencyOriginal  String
+  amountCompany     Decimal  @db.Decimal(18, 2)
+  currencyCompany   String
+  exchangeRateApplied Decimal @db.Decimal(18, 8)
+  rateDate          DateTime
+
+  vendor            String?
+  status            ExpenseStatus @default(PENDING)
+
+  receiptId         String?
+  receipt           Receipt? @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+
+  submittedAt       DateTime @default(now())
+  decidedAt         DateTime?
+
+  // 1:1 approval runtime instance
+  approvalInstance  ApprovalInstance?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([companyId, status, expenseDate])
+  @@index([submittedById])
 }
 
-model Approval {
-  id         String         @id @default(cuid())
-  expenseId  String
-  approverId String
-  sequence   Int
-  status     ApprovalStatus @default(PENDING)
-  comments   String?
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
+// ---------- Approval Policy (definition) ----------
+model ApprovalPolicy {
+  id                     String   @id @default(cuid())
+  companyId              String
+  company                Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  expense  Expense @relation(fields: [expenseId], references: [id])
-  approver User    @relation(fields: [approverId], references: [id])
+  name                   String
+  isManagerFirstApprover Boolean  @default(true)
 
-  @@unique([expenseId, sequence])
-  @@map("approvals")
+  // Global conditional rule (optional)
+  ruleType               ApprovalRuleType @default(NONE)
+  minPercentApprove      Int?              // 0..100
+  specificApproverUserId String?
+  logicalOperator        LogicalOperator?  // AND/OR when HYBRID
+
+  // Threshold & category scoping (to enable “define flows based on thresholds”)
+  appliesToCategory      String?           // null = all categories
+  minAmountCompany       Decimal? @db.Decimal(18, 2)
+  maxAmountCompany       Decimal? @db.Decimal(18, 2)
+
+  steps                  ApprovalStep[]
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([companyId])
 }
 
-enum Role {
-  ADMIN
-  MANAGER
-  EMPLOYEE
+model ApprovalStep {
+  id              String         @id @default(cuid())
+  policyId        String
+  policy          ApprovalPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  sequence        Int            // 1..N
+  name            String?
+
+  // Approver can be fixed user or role (role expands to all users with that role)
+  approverUserId  String?
+  approverUser    User?          @relation(fields: [approverUserId], references: [id])
+  approverRole    Role?
+
+  // Optional step-level % rule (fallback to policy-level if null)
+  minPercentApprove Int?
+
+  @@unique([policyId, sequence])
 }
 
-enum RuleType {
-  SEQUENTIAL
-  PERCENTAGE
-  HYBRID
+// ---------- Approval Runtime (instances) ----------
+model ApprovalInstance {
+  id         String   @id @default(cuid())
+  expenseId  String   @unique
+  expense    Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  status     ApprovalInstanceStatus @default(PENDING)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  steps      ApprovalInstanceStep[]
 }
 
-enum ExpenseStatus {
-  PENDING
-  APPROVED
-  REJECTED
-  PROCESSING
+model ApprovalInstanceStep {
+  id           String   @id @default(cuid())
+  instanceId   String
+  instance     ApprovalInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  policyStepId String?
+  policyStep   ApprovalStep? @relation(fields: [policyStepId], references: [id], onDelete: SetNull)
+
+  sequence     Int
+  name         String?
+  status       ApprovalInstanceStatus @default(PENDING)
+
+  // Snapshot of rules for this step at creation time
+  minPercentApprove     Int?
+  specificApproverUserId String?
+  logicalOperator       LogicalOperator?
+
+  tasks        ApprovalTask[]
+
+  @@unique([instanceId, sequence])
 }
 
-enum ApprovalStatus {
-  PENDING
-  APPROVED
-  REJECTED
+model ApprovalTask {
+  id             String   @id @default(cuid())
+  stepId         String
+  step           ApprovalInstanceStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+
+  approverUserId String
+  approver       User     @relation(fields: [approverUserId], references: [id], onDelete: Restrict)
+
+  status         ApprovalTaskStatus @default(PENDING)
+  comment        String?
+  decidedAt      DateTime?
+
+  createdAt      DateTime @default(now())
+
+  @@index([approverUserId, status])
 }

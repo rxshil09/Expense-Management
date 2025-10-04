@@ -14,13 +14,13 @@ export default function HomePage() {
           </p>
           <div className="space-x-4">
             <Link
-              href="/(auth)/login"
+              href="/login"
               className="bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
             >
               Sign In
             </Link>
             <Link
-              href="/(auth)/register"
+              href="/register"
               className="bg-white text-blue-600 px-8 py-3 rounded-lg font-semibold border border-blue-600 hover:bg-blue-50 transition-colors"
             >
               Get Started

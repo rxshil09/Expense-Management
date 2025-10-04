@@ -1,0 +1,128 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  firstName String
+  lastName  String
+  role      Role     @default(EMPLOYEE)
+  companyId String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id])
+  expenses  Expense[]
+  approvals Approval[]
+
+  @@map("users")
+}
+
+model Company {
+  id          String   @id @default(cuid())
+  name        String
+  domain      String   @unique
+  currency    String   @default("USD")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users    User[]
+  rules    Rule[]
+  expenses Expense[]
+
+  @@map("companies")
+}
+
+model Rule {
+  id          String      @id @default(cuid())
+  name        String
+  companyId   String
+  category    String?
+  minAmount   Decimal?
+  maxAmount   Decimal?
+  approvers   String[]    // JSON array of user IDs
+  sequence    Int         @default(1)
+  percentage  Int?        // For percentage-based approvals
+  ruleType    RuleType    @default(SEQUENTIAL)
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@map("rules")
+}
+
+model Expense {
+  id          String        @id @default(cuid())
+  userId      String
+  companyId   String
+  amount      Decimal
+  currency    String        @default("USD")
+  category    String
+  description String
+  date        DateTime
+  receiptUrl  String?
+  status      ExpenseStatus @default(PENDING)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id])
+  company   Company    @relation(fields: [companyId], references: [id])
+  approvals Approval[]
+
+  @@map("expenses")
+}
+
+model Approval {
+  id         String         @id @default(cuid())
+  expenseId  String
+  approverId String
+  sequence   Int
+  status     ApprovalStatus @default(PENDING)
+  comments   String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  expense  Expense @relation(fields: [expenseId], references: [id])
+  approver User    @relation(fields: [approverId], references: [id])
+
+  @@unique([expenseId, sequence])
+  @@map("approvals")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum RuleType {
+  SEQUENTIAL
+  PERCENTAGE
+  HYBRID
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PROCESSING
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}

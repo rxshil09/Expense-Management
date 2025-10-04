@@ -1,0 +1,70 @@
+/* Custom Checkbox Styles */
+.checkbox-wrapper-19 {
+  --background-color: #fff;
+  --checkbox-height: 16px; /* slightly smaller than default */
+}
+
+.checkbox-wrapper-19 input[type=checkbox] {
+  display: none;
+}
+
+.checkbox-wrapper-19 .check-box {
+  height: var(--checkbox-height);
+  width: var(--checkbox-height);
+  background-color: transparent;
+  border: calc(var(--checkbox-height) * .1) solid #D1D5DB; /* gray border */
+  border-radius: 5px;
+  position: relative;
+  display: inline-block;
+  box-sizing: border-box;
+  transition: border-color ease 0.2s;
+  cursor: pointer;
+}
+
+.checkbox-wrapper-19 .check-box::before,
+.checkbox-wrapper-19 .check-box::after {
+  position: absolute;
+  height: 0;
+  width: calc(var(--checkbox-height) * .18); /* tick thickness */
+  background-color: #4b5563; /* gray tick */
+  display: inline-block;
+  transform-origin: left top;
+  border-radius: 3px;
+  content: " ";
+}
+
+/* bottom leg */
+.checkbox-wrapper-19 .check-box::after {
+  top: calc(var(--checkbox-height) * .37);
+  left: calc(var(--checkbox-height) * .05);
+  transform: rotate(-45deg);
+}
+
+/* top leg */
+.checkbox-wrapper-19 .check-box::before {
+  top: calc(var(--checkbox-height) * .72);
+  left: calc(var(--checkbox-height) * .41);
+  transform: rotate(-135deg);
+}
+
+/* Animate when checked */
+.checkbox-wrapper-19 input[type=checkbox]:checked + .check-box::after {
+  height: calc(var(--checkbox-height) / 2.2);
+  animation: dothabottomcheck-19 0.1s ease forwards;
+}
+
+.checkbox-wrapper-19 input[type=checkbox]:checked + .check-box::before {
+  height: calc(var(--checkbox-height) * 1.0);
+  animation: dothatopcheck-19 0.2s ease forwards;
+}
+
+@keyframes dothabottomcheck-19 {
+  0% { height: 0; }
+  100% { height: calc(var(--checkbox-height) / 2.2); }
+}
+
+@keyframes dothatopcheck-19 {
+  0% { height: 0; }
+  50% { height: 0; }
+  100% { height: calc(var(--checkbox-height) * 1.0); }
+}
